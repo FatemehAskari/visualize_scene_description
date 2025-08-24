@@ -1,0 +1,443 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Build a local HTML viewer for per-(shape,color) attention overlays with selectors:
+- image (common triplet_id across datasets)
+- dataset (row / just_number / just_scan / simple)
+- layer (0..27)
+- value mode (shape / color / both)
+
+It scans:
+  BASE_SRC = /home/mmd/qwen/Scene_description/halluciantion/one_image_per_triplet_objs15
+and expects per-dataset layout:
+  <dataset>/15/<triplet_id>/{ *_0.(png|jpg|...), attn_patches_*.json }
+
+Outputs:
+  BASE_SRC/viz_html/index.html
+You then serve it locally: python3 -m http.server 8000
+and open http://localhost:8000
+
+Note: The HTML embeds a manifest (datasets, common triplet_ids, relative paths).
+JS renders overlays on-the-fly (Canvas) from the JSON (no pre-rendered PNGs).
+"""
+
+import os
+import json
+import re
+from pathlib import Path
+
+# --------------------
+# CONFIG
+# --------------------
+BASE_SRC   = Path(r"C:\Users\user\Desktop\FatemehUni\master\project\draw\one_image_per_triplet_objs15")
+DATASETS   = ["row", "just_number", "just_scan", "simple"]
+OBJ_LEVEL  = "15"     # we only look under <dataset>/15/...
+OUT_DIR    = BASE_SRC / "viz_html"
+OUT_HTML   = OUT_DIR / "index.html"
+
+IMG_EXTS   = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+JSON_PREFIX = "attn_patches_"
+
+# --------------------
+def find_entries_for_dataset(ds_root: Path) -> dict:
+    """
+    Scan ds_root/<OBJ_LEVEL>/<triplet_id>/ and find exactly one image *_0.<ext>
+    and a JSON attn_patches_*.json.
+    Returns: { triplet_id : {"image": relpath, "json": relpath} }
+    Only entries with both image+json are kept.
+    """
+    result = {}
+    level_dir = ds_root / OBJ_LEVEL
+    if not level_dir.is_dir():
+        return result
+    for triplet_dir in sorted([p for p in level_dir.iterdir() if p.is_dir()], key=lambda p: p.name):
+        # pick image ending with _0.*
+        img = None
+        for f in sorted(triplet_dir.iterdir()):
+            if f.suffix.lower() in IMG_EXTS and f.stem.endswith("_0"):
+                img = f
+                break
+        # find json
+        js = None
+        for f in sorted(triplet_dir.iterdir()):
+            if f.suffix.lower() == ".json" and f.name.startswith(JSON_PREFIX):
+                js = f
+                break
+        if img and js:
+            result[triplet_dir.name] = {
+                "image": os.path.relpath(img, OUT_DIR),
+                "json":  os.path.relpath(js, OUT_DIR),
+            }
+    return result
+
+def build_manifest():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    ds_maps = {}
+    for ds in DATASETS:
+        ds_root = BASE_SRC / ds
+        ds_maps[ds] = find_entries_for_dataset(ds_root)
+
+    # Intersect triplet_ids across all datasets to ensure aligned choices
+    sets = [set(m.keys()) for m in ds_maps.values() if m]
+    common_ids = sorted(list(set.intersection(*sets))) if sets else []
+    # Keep up to 10 if you want exactly 10 (comment out if you want all)
+    if len(common_ids) > 10:
+        common_ids = common_ids[:10]
+
+    manifest = {
+        "datasets": DATASETS,
+        "triplet_ids": common_ids,
+        "entries": ds_maps,  # entries[dataset][triplet_id] = {image, json}
+        "layers": list(range(28)),
+        "note": "paths are relative to the location of index.html",
+    }
+    return manifest
+
+def write_html(manifest: dict):
+    # Ensure output dir exists
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Dump manifest once
+    manifest_js = json.dumps(manifest, ensure_ascii=False)
+
+    # Plain triple-quoted string (NOT an f-string). We inject manifest by replace().
+    html = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Value-only Attention Viewer (shape / color / both)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    margin: 16px;
+    color: #222;
+  }
+  h1 { margin: 0 0 8px 0; font-size: 20px; }
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(200px, 1fr));
+    gap: 12px; margin: 12px 0 16px 0;
+  }
+  .row { margin: 12px 0; }
+  .base-image { max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 8px; }
+  #tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px; margin-top: 12px;
+  }
+  .tile {
+    border: 1px solid #e0e0e0; border-radius: 10px; padding: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05); background: #fff;
+  }
+  .cap { font-size: 12px; color: #555; margin: 4px 0 8px 0; line-height: 1.2; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+  .muted { color: #777; font-size: 13px; }
+  select, option { font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>Value-only Attention Viewer</h1>
+  <div class="muted">
+    Pick: image (triplet id), dataset variant, layer (0..27), and value mode (shape / color / both).
+    Tiles show overlay heatmaps for each (shape,color) pair in the generated output.
+  </div>
+
+  <div class="controls">
+    <label>
+      <div>Image (triplet id)</div>
+      <select id="sel-image"></select>
+    </label>
+    <label>
+      <div>Dataset</div>
+      <select id="sel-ds"></select>
+    </label>
+    <label>
+      <div>Layer</div>
+      <select id="sel-layer"></select>
+    </label>
+    <label>
+      <div>Value mode</div>
+      <select id="sel-mode">
+        <option value="both">both (average of shape & color)</option>
+        <option value="shape">shape only</option>
+        <option value="color">color only</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="row">
+    <img id="base" class="base-image" alt="base image"/>
+  </div>
+
+  <div id="tiles"></div>
+
+<script>
+// ---- embedded manifest ----
+const MANIFEST = __MANIFEST__;
+
+// ---- helpers (matching/parsing/colormap) ----
+function normalizeToken(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9\-]+/g, "");
+}
+function parsePairsFromGeneratedText(raw) {
+  if (!raw) return [];
+  try {
+    const i0 = raw.indexOf("[");
+    const i1 = raw.lastIndexOf("]");
+    if (i0 >= 0 && i1 > i0) {
+      const arr = JSON.parse(raw.slice(i0, i1 + 1));
+      const out = [];
+      for (const obj of arr) {
+        if (obj && typeof obj === "object" && "shape" in obj && "color" in obj) {
+          out.push([String(obj.shape), String(obj.color)]);
+        }
+      }
+      if (out.length) return out;
+    }
+  } catch (e) {}
+  const out = [];
+  const reObj = /\{[^}]*\}/gs;
+  const reShape = /"shape"\s*:\s*"([^"]+)"/;
+  const reColor = /"color"\s*:\s*"([^"]+)"/;
+  for (const g of raw.matchAll(reObj)) {
+    const s = g[0];
+    const ms = s.match(reShape);
+    const mc = s.match(reColor);
+    if (ms && mc) out.push([ms[1], mc[1]]);
+  }
+  return out;
+}
+function orderedTokensAndLayers(per_token) {
+  const items = Object.entries(per_token).sort((a,b)=> (a[0]<b[0]?-1:(a[0]>b[0]?1:0)));
+  const tokens = [], tpl = [];
+  for (const [k, v] of items) {
+    const idx = k.indexOf(":");
+    const tok = idx >= 0 ? k.slice(idx+1) : k;
+    tokens.push(tok); tpl.push(v);
+  }
+  return { tokens, tpl };
+}
+function matchValueToTokens(value, tok_norm, startPos, maxSpan=3) {
+  const target = normalizeToken(value);
+  const N = tok_norm.length;
+  for (let i=startPos; i<N; i++) {
+    for (let L=Math.min(maxSpan, N-i); L>=1; L--) {
+      const chunk = tok_norm.slice(i, i+L);
+      if (chunk.some(c => !c)) continue;
+      const hy = chunk.join("-");
+      const co = chunk.join("");
+      if (target === hy || target === co) {
+        return { idxs: Array.from({length:L}, (_,k)=>i+k), newPos: i+L };
+      }
+    }
+  }
+  return { idxs: [], newPos: startPos };
+}
+function inferGrid(nPatches, imgW, imgH) {
+  const targetRatio = imgW / Math.max(1e-6, imgH);
+  let best = null;
+  for (let gh=1; gh<=nPatches; gh++) {
+    if (nPatches % gh !== 0) continue;
+    const gw = Math.floor(nPatches / gh);
+    const ratio = gw / gh;
+    const err = Math.abs(ratio - targetRatio);
+    if (best === null || err < best.err) best = { err, gh, gw };
+  }
+  if (!best) {
+    const gw = Math.max(1, Math.round(Math.sqrt(nPatches)));
+    const gh = Math.max(1, Math.floor(nPatches / gw));
+    return { gh, gw: Math.max(1, Math.floor(nPatches/gh)) };
+  }
+  return { gh: best.gh, gw: best.gw };
+}
+// simple 'jet' colormap
+function jetColor(x) {
+  const r = Math.min(1, Math.max(0, 1.5 - Math.abs(4*x - 3)));
+  const g = Math.min(1, Math.max(0, 1.5 - Math.abs(4*x - 2)));
+  const b = Math.min(1, Math.max(0, 1.5 - Math.abs(4*x - 1)));
+  return [Math.round(r*255), Math.round(g*255), Math.round(b*255), 200];
+}
+function vectorForTokenLayer(patchLayers, layerKey, P) {
+  const v = new Float32Array(P); v.fill(NaN);
+  for (let p=0; p<P; p++) {
+    const m = patchLayers["patch"+p]; if (!m) continue;
+    const val = m[layerKey]; if (typeof val === "number") v[p] = val;
+  }
+  return v;
+}
+function nanmeanVectors(vecs) {
+  if (!vecs.length) return null;
+  const P = vecs[0].length;
+  const out = new Float32Array(P); const cnt = new Uint16Array(P);
+  out.fill(0);
+  for (const v of vecs) {
+    for (let i=0;i<P;i++) {
+      const x = v[i]; if (!Number.isFinite(x)) continue;
+      out[i] += x; cnt[i] += 1;
+    }
+  }
+  for (let i=0;i<P;i++) out[i] = cnt[i] ? (out[i]/cnt[i]) : NaN;
+  return out;
+}
+async function drawTile(canvas, baseImg, grid, gh, gw, title) {
+  const ctx = canvas.getContext("2d");
+  const W = baseImg.naturalWidth, H = baseImg.naturalHeight;
+  const maxW = 640, scale = Math.min(1, maxW / W);
+  const CW = Math.round(W*scale), CH = Math.round(H*scale);
+  canvas.width = CW; canvas.height = CH;
+  ctx.drawImage(baseImg, 0, 0, CW, CH);
+  const finiteVals = grid.filter(Number.isFinite);
+  let vmax = 1.0;
+  if (finiteVals.length) {
+    const sorted = Array.from(finiteVals).sort((a,b)=>a-b);
+    const idx = Math.min(sorted.length-1, Math.floor(0.99*(sorted.length-1)));
+    vmax = Math.max(1e-6, sorted[idx]);
+  }
+  const pw = CW / gw, ph = CH / gh;
+  ctx.save();
+  for (let r=0; r<gh; r++) {
+    for (let c=0; c<gw; c++) {
+      const v = grid[r*gw + c]; if (!Number.isFinite(v)) continue;
+      const x = Math.min(1, Math.max(0, v / vmax));
+      const [R,G,B,A] = jetColor(x);
+      ctx.fillStyle = "rgba("+R+","+G+","+B+","+(A/255)+")";
+      ctx.fillRect(Math.round(c*pw), Math.round(r*ph), Math.ceil(pw), Math.ceil(ph));
+    }
+  }
+  ctx.restore();
+  // patch grid
+  ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 1;
+  for (let c=1;c<gw;c++) { const x = Math.round(c*pw) + 0.5; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,CH); ctx.stroke(); }
+  for (let r=1;r<gh;r++) { const y = Math.round(r*ph) + 0.5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CW,y); ctx.stroke(); }
+  ctx.restore();
+}
+
+// ---- Main render ----
+async function render() {
+  const ds   = document.getElementById("sel-ds").value;
+  const imgK = document.getElementById("sel-image").value;
+  const L0   = parseInt(document.getElementById("sel-layer").value, 10);
+  const mode = document.getElementById("sel-mode").value;
+
+  const entry = (MANIFEST.entries[ds]||{})[imgK];
+  const tilesDiv = document.getElementById("tiles");
+  tilesDiv.innerHTML = "";
+
+  if (!entry) { tilesDiv.textContent = "No entry for this dataset/image selection."; return; }
+
+  // base image
+  const base = document.getElementById("base");
+  base.src = entry.image;
+
+  // JSON
+  let data;
+  try {
+    const resp = await fetch(entry.json);
+    data = await resp.json();
+  } catch (e) { tilesDiv.textContent = "Failed to load JSON: " + e; return; }
+
+  const gen_text  = data.generated_text || "";
+  const per_token = data.per_token || {};
+  const pairs = parsePairsFromGeneratedText(gen_text);
+  if (!pairs.length) { tilesDiv.textContent = "No (shape,color) pairs parsed from generated_text."; return; }
+
+  const { tokens, tpl } = orderedTokensAndLayers(per_token);
+  const tokNorm = tokens.map(normalizeToken);
+
+  // infer patches
+  const first = tpl[0] || {};
+  let maxPatch = -1;
+  for (const k of Object.keys(first)) {
+    if (k.startsWith("patch")) {
+      const idx = parseInt(k.slice(5), 10);
+      if (Number.isFinite(idx)) maxPatch = Math.max(maxPatch, idx);
+    }
+  }
+  const P = maxPatch + 1;
+  if (!(P>0)) { tilesDiv.textContent = "Could not infer #patches from JSON."; return; }
+
+  // wait image for size
+  await new Promise(ok => { if (base.complete) return ok(); base.onload = () => ok(); base.onerror = () => ok(); });
+  const { gh:GH, gw:GW } = inferGrid(P, base.naturalWidth, base.naturalHeight);
+  const layerKey = "layer" + String(L0+1);
+
+  // cache
+  const cache = new Map();
+  const getVec = (ti) => {
+    const key = (ti<<5) + L0;
+    if (!cache.has(key)) cache.set(key, vectorForTokenLayer(tpl[ti], layerKey, P));
+    return cache.get(key);
+  };
+
+  // tiles
+  let pos = 0, idxPair = 0;
+  for (const [shape, color] of pairs) {
+    idxPair++;
+    const ms = matchValueToTokens(shape, tokNorm, pos, 3);
+    const mc = matchValueToTokens(color, tokNorm, ms.newPos, 3);
+    pos = mc.newPos;
+
+    const vecs = [];
+    if (mode === "shape" || mode === "both") for (const ti of ms.idxs) vecs.push(getVec(ti));
+    if (mode === "color" || mode === "both") for (const ti of mc.idxs) vecs.push(getVec(ti));
+    if (!vecs.length) {
+      console.warn(`L${String(L0).padStart(2,"0")} pair#${idxPair} '${shape},${color}' -> no tokens matched; skip`);
+      continue;
+    }
+
+    const v = nanmeanVectors(vecs);
+    const grid = Array.from(v);
+    const wrap = document.createElement("div"); wrap.className = "tile";
+    const cap  = document.createElement("div"); cap.className  = "cap";
+    cap.textContent = `${idxPair}. shape=${shape}, color=${color} — layer ${L0}`;
+    const cv   = document.createElement("canvas");
+    wrap.appendChild(cap); wrap.appendChild(cv); tilesDiv.appendChild(wrap);
+    await drawTile(cv, base, grid, GH, GW);
+  }
+  if (!tilesDiv.children.length) tilesDiv.textContent = "No tiles to display (all pairs skipped).";
+}
+
+// ---- init UI ----
+(function initUI() {
+  const selImage = document.getElementById("sel-image");
+  const selDs    = document.getElementById("sel-ds");
+  const selL     = document.getElementById("sel-layer");
+
+  for (const ds of MANIFEST.datasets) { const o = document.createElement("option"); o.value = ds; o.textContent = ds; selDs.appendChild(o); }
+  for (const t of MANIFEST.triplet_ids) { const o = document.createElement("option"); o.value = t; o.textContent = t; selImage.appendChild(o); }
+  for (let i=0;i<28;i++) { const o = document.createElement("option"); o.value = i; o.textContent = String(i); selL.appendChild(o); }
+
+  if (selImage.options.length>0) selImage.selectedIndex = 0;
+  if (selDs.options.length>0) selDs.selectedIndex = 0;
+  selL.value = "14";
+
+  selImage.addEventListener("change", render);
+  selDs.addEventListener("change", render);
+  selL.addEventListener("change", render);
+  document.getElementById("sel-mode").addEventListener("change", render);
+
+  render();
+})();
+</script>
+</body>
+</html>
+"""
+
+    # Inject manifest JSON
+    html = html.replace("__MANIFEST__", manifest_js)
+
+    OUT_HTML.write_text(html, encoding="utf-8")
+    print(f"[OK] Wrote HTML -> {OUT_HTML}")
+
+
+def main():
+    manifest = build_manifest()
+    if not manifest["triplet_ids"]:
+        print("[WARN] No common triplet_ids across datasets; viewer will have empty image list.")
+    write_html(manifest)
+
+if __name__ == "__main__":
+    main()
