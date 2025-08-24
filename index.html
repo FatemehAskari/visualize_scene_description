@@ -5,7 +5,7 @@
 <title>Value-only Attention Viewer (shape / color / both)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:16px;color:#222}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;margin:16px;color:#222}
   h1{margin:0 0 8px 0;font-size:20px}
   .controls{display:grid;grid-template-columns:repeat(4,minmax(200px,1fr));gap:12px;margin:12px 0 16px 0}
   .row{margin:12px 0}
@@ -16,6 +16,7 @@
   canvas{width:100%;height:auto;display:block;border-radius:6px}
   .muted{color:#777;font-size:13px}
   select,option{font-size:14px}
+  .error{color:#b00020;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -55,51 +56,58 @@
   <div id="tiles"></div>
 
 <script>
-// === 1) Embedded manifest (paths can have backslashes; we normalize later) ===
-// مسیرها را مطابق خروجی اسکریپت مان درست بگذار
+/* ============================
+   1) EMBEDDED MANIFEST (EDIT!)
+   ----------------------------
+   - Paths are RELATIVE to this HTML file.
+   - Use forward slashes.
+   - Make sure the JSON files are actually present in the repo
+     (GitHub Pages can't fetch Git LFS pointers unless they're served).
+============================ */
 const MANIFEST = {
-  "datasets": ["row", "just_number", "just_scan", "simple"],
-  "triplet_ids": ["5","10","20","35","45","50"],
-  "entries": {
-    "row": {
-      "5":{"image":"../row/15/5/nObjects=15_triplet=5_0.png","json":"../row/15/5/attn_patches_nObjects=15_triplet=5_0.json"},
-      "10":{"image":"../row/15/10/nObjects=15_triplet=10_0.png","json":"../row/15/10/attn_patches_nObjects=15_triplet=10_0.json"},
-      "20":{"image":"../row/15/20/nObjects=15_triplet=20_0.png","json":"../row/15/20/attn_patches_nObjects=15_triplet=20_0.json"},
-      "35":{"image":"../row/15/35/nObjects=15_triplet=35_0.png","json":"../row/15/35/attn_patches_nObjects=15_triplet=35_0.json"},
-      "45":{"image":"../row/15/45/nObjects=15_triplet=45_0.png","json":"../row/15/45/attn_patches_nObjects=15_triplet=45_0.json"},
-      "50":{"image":"../row/15/50/nObjects=15_triplet=50_0.png","json":"../row/15/50/attn_patches_nObjects=15_triplet=50_0.json"}
+  datasets: ["row", "just_number", "just_scan", "simple"],
+  triplet_ids: ["5","10","20","35","45","50"], // <-- edit if needed
+  entries: {
+    row: {
+      "5":  { image: "row/15/5/nObjects=15_triplet=5_0.png",  json: "row/15/5/attn_patches_nObjects=15_triplet=5_0.json" },
+      "10": { image: "row/15/10/nObjects=15_triplet=10_0.png", json: "row/15/10/attn_patches_nObjects=15_triplet=10_0.json" },
+      "20": { image: "row/15/20/nObjects=15_triplet=20_0.png", json: "row/15/20/attn_patches_nObjects=15_triplet=20_0.json" },
+      "35": { image: "row/15/35/nObjects=15_triplet=35_0.png", json: "row/15/35/attn_patches_nObjects=15_triplet=35_0.json" },
+      "45": { image: "row/15/45/nObjects=15_triplet=45_0.png", json: "row/15/45/attn_patches_nObjects=15_triplet=45_0.json" },
+      "50": { image: "row/15/50/nObjects=15_triplet=50_0.png", json: "row/15/50/attn_patches_nObjects=15_triplet=50_0.json" }
     },
-    "just_number": {
-      "5":{"image":"../just_number/15/5/nObjects=15_triplet=5_0.png","json":"../just_number/15/5/attn_patches_nObjects=15_triplet=5_0.json"},
-      "10":{"image":"../just_number/15/10/nObjects=15_triplet=10_0.png","json":"../just_number/15/10/attn_patches_nObjects=15_triplet=10_0.json"},
-      "20":{"image":"../just_number/15/20/nObjects=15_triplet=20_0.png","json":"../just_number/15/20/attn_patches_nObjects=15_triplet=20_0.json"},
-      "35":{"image":"../just_number/15/35/nObjects=15_triplet=35_0.png","json":"../just_number/15/35/attn_patches_nObjects=15_triplet=35_0.json"},
-      "45":{"image":"../just_number/15/45/nObjects=15_triplet=45_0.png","json":"../just_number/15/45/attn_patches_nObjects=15_triplet=45_0.json"},
-      "50":{"image":"../just_number/15/50/nObjects=15_triplet=50_0.png","json":"../just_number/15/50/attn_patches_nObjects=15_triplet=50_0.json"}
+    just_number: {
+      "5":  { image: "just_number/15/5/nObjects=15_triplet=5_0.png",  json: "just_number/15/5/attn_patches_nObjects=15_triplet=5_0.json" },
+      "10": { image: "just_number/15/10/nObjects=15_triplet=10_0.png", json: "just_number/15/10/attn_patches_nObjects=15_triplet=10_0.json" },
+      "20": { image: "just_number/15/20/nObjects=15_triplet=20_0.png", json: "just_number/15/20/attn_patches_nObjects=15_triplet=20_0.json" },
+      "35": { image: "just_number/15/35/nObjects=15_triplet=35_0.png", json: "just_number/15/35/attn_patches_nObjects=15_triplet=35_0.json" },
+      "45": { image: "just_number/15/45/nObjects=15_triplet=45_0.png", json: "just_number/15/45/attn_patches_nObjects=15_triplet=45_0.json" },
+      "50": { image: "just_number/15/50/nObjects=15_triplet=50_0.png", json: "just_number/15/50/attn_patches_nObjects=15_triplet=50_0.json" }
     },
-    "just_scan": {
-      "5":{"image":"../just_scan/15/5/nObjects=15_triplet=5_0.png","json":"../just_scan/15/5/attn_patches_nObjects=15_triplet=5_0.json"},
-      "10":{"image":"../just_scan/15/10/nObjects=15_triplet=10_0.png","json":"../just_scan/15/10/attn_patches_nObjects=15_triplet=10_0.json"},
-      "20":{"image":"../just_scan/15/20/nObjects=15_triplet=20_0.png","json":"../just_scan/15/20/attn_patches_nObjects=15_triplet=20_0.json"},
-      "35":{"image":"../just_scan/15/35/nObjects=15_triplet=35_0.png","json":"../just_scan/15/35/attn_patches_nObjects=15_triplet=35_0.json"},
-      "45":{"image":"../just_scan/15/45/nObjects=15_triplet=45_0.png","json":"../just_scan/15/45/attn_patches_nObjects=15_triplet=45_0.json"},
-      "50":{"image":"../just_scan/15/50/nObjects=15_triplet=50_0.png","json":"../just_scan/15/50/attn_patches_nObjects=15_triplet=50_0.json"}
+    just_scan: {
+      "5":  { image: "just_scan/15/5/nObjects=15_triplet=5_0.png",  json: "just_scan/15/5/attn_patches_nObjects=15_triplet=5_0.json" },
+      "10": { image: "just_scan/15/10/nObjects=15_triplet=10_0.png", json: "just_scan/15/10/attn_patches_nObjects=15_triplet=10_0.json" },
+      "20": { image: "just_scan/15/20/nObjects=15_triplet=20_0.png", json: "just_scan/15/20/attn_patches_nObjects=15_triplet=20_0.json" },
+      "35": { image: "just_scan/15/35/nObjects=15_triplet=35_0.png", json: "just_scan/15/35/attn_patches_nObjects=15_triplet=35_0.json" },
+      "45": { image: "just_scan/15/45/nObjects=15_triplet=45_0.png", json: "just_scan/15/45/attn_patches_nObjects=15_triplet=45_0.json" },
+      "50": { image: "just_scan/15/50/nObjects=15_triplet=50_0.png", json: "just_scan/15/50/attn_patches_nObjects=15_triplet=50_0.json" }
     },
-    "simple": {
-      "5":{"image":"../simple/15/5/nObjects=15_triplet=5_0.png","json":"../simple/15/5/attn_patches_nObjects=15_triplet=5_0.json"},
-      "10":{"image":"../simple/15/10/nObjects=15_triplet=10_0.png","json":"../simple/15/10/attn_patches_nObjects=15_triplet=10_0.json"},
-      "20":{"image":"../simple/15/20/nObjects=15_triplet=20_0.png","json":"../simple/15/20/attn_patches_nObjects=15_triplet=20_0.json"},
-      "35":{"image":"../simple/15/35/nObjects=15_triplet=35_0.png","json":"../simple/15/35/attn_patches_nObjects=15_triplet=35_0.json"},
-      "45":{"image":"../simple/15/45/nObjects=15_triplet=45_0.png","json":"../simple/15/45/attn_patches_nObjects=15_triplet=45_0.json"},
-      "50":{"image":"../simple/15/50/nObjects=15_triplet=50_0.png","json":"../simple/15/50/attn_patches_nObjects=15_triplet=50_0.json"}
+    simple: {
+      "5":  { image: "simple/15/5/nObjects=15_triplet=5_0.png",  json: "simple/15/5/attn_patches_nObjects=15_triplet=5_0.json" },
+      "10": { image: "simple/15/10/nObjects=15_triplet=10_0.png", json: "simple/15/10/attn_patches_nObjects=15_triplet=10_0.json" },
+      "20": { image: "simple/15/20/nObjects=15_triplet=20_0.png", json: "simple/15/20/attn_patches_nObjects=15_triplet=20_0.json" },
+      "35": { image: "simple/15/35/nObjects=15_triplet=35_0.png", json: "simple/15/35/attn_patches_nObjects=15_triplet=35_0.json" },
+      "45": { image: "simple/15/45/nObjects=15_triplet=45_0.png", json: "simple/15/45/attn_patches_nObjects=15_triplet=45_0.json" },
+      "50": { image: "simple/15/50/nObjects=15_triplet=50_0.png", json: "simple/15/50/attn_patches_nObjects=15_triplet=50_0.json" }
     }
   },
-  "layers": Array.from({length:28},(_,i)=>i),
-  "note":"paths are relative to the location of viewer.html"
+  layers: Array.from({length: 28}, (_,i)=>i),
+  note: "paths are relative to index.html"
 };
 
-// === 2) Helpers: parsing / matching ===
-const normPath = p => (p||"").replace(/\\/g,'/'); // backslash → slash
+/* ============================
+   2) SMALL HELPERS
+============================ */
 function normalizeToken(s){return (s||"").toLowerCase().replace(/[^a-z0-9\-]+/g,"");}
 function parsePairsFromGeneratedText(raw){
   if(!raw) return [];
@@ -158,140 +166,149 @@ function nanmeanVectors(vecs){
   for(let i=0;i<P;i++) out[i]=cnt[i]?out[i]/cnt[i]:NaN;
   return out;
 }
+function makeUrl(p){ return new URL((p||"").replace(/\\/g,"/"), document.baseURI).toString(); }
 
-// Colormap (HSL blue→red)
-function hsl2rgb(h,s,l){h/=360; s/=100; l/=100; const a=s*Math.min(l,1-l);
-  const f=n=>{const k=(n+h*12)%12; const c=l - a*Math.max(-1,Math.min(k-3,9-k,1)); return Math.round(305*c);};
+/* ============================
+   3) SMOOTH OVERLAY (no grid)
+============================ */
+function hsl2rgb(h,s,l){ // h[0..360], s/l[0..100]
+  h/=360; s/=100; l/=100; const a=s*Math.min(l,1-l);
+  const f=n=>{const k=(n+h*12)%12; const c=l - a*Math.max(-1,Math.min(k-3,9-k,1)); return Math.round(255*c);};
   return [f(0),f(8),f(4)];
 }
-
-// === 3) Smooth overlay drawer ===
 async function drawSmoothOverlay(canvas, baseImgEl, grid, gh, gw, opts={}){
-  const {alpha=0.45, blurPx=4, vmax=null, drawGrid=false} = opts;
+  const {alpha=0.45, blurPx=4, vmax=null} = opts;
   const ctx = canvas.getContext('2d');
   const W = baseImgEl.naturalWidth || baseImgEl.width, H = baseImgEl.naturalHeight || baseImgEl.height;
-  const scale = Math.min(1, 700/W); // سقف پهنای کاشی ~700px
+  const scale = Math.min(1, 700/W);
   const CW = Math.round(W*scale), CH = Math.round(H*scale);
   canvas.width = CW; canvas.height = CH;
 
-  // 1) draw base
+  // 1) draw base image
   ctx.clearRect(0,0,CW,CH);
   ctx.drawImage(baseImgEl, 0, 0, CW, CH);
 
-  // 2) offscreen heatmap gw×gh
+  // 2) paint small heatmap (gw×gh) then upscale smoothly
   const off = document.createElement('canvas'); off.width = gw; off.height = gh;
   const octx = off.getContext('2d');
   const imgData = octx.createImageData(gw, gh);
 
-  const vals = Array.from(grid, v=>Number.isFinite(v)?v:0);
+  const finite = grid.filter(Number.isFinite);
   let vmaxUse = vmax;
   if(vmaxUse==null){
-    const srt = vals.slice().sort((a,b)=>a-b);
-    vmaxUse = srt[Math.floor(0.99*(srt.length-1))] || 1;
+    if (finite.length) {
+      const sorted = Array.from(finite).sort((a,b)=>a-b);
+      vmaxUse = sorted[Math.floor(0.99*(sorted.length-1))] || 1;
+    } else { vmaxUse = 1; }
     if(!isFinite(vmaxUse) || vmaxUse<=0) vmaxUse=1;
   }
 
   for(let j=0;j<gh;j++){
     for(let i=0;i<gw;i++){
-      const v = Math.max(0, Math.min(1, vals[j*gw+i]/vmaxUse));
-      const hue = (1-v)*240; const [r,g,b] = hsl2rgb(hue,100,50);
+      const v = grid[j*gw+i];
+      const x = Number.isFinite(v) ? Math.max(0, Math.min(1, v / vmaxUse)) : 0;
+      const hue = (1-x)*240; const [r,g,b] = hsl2rgb(hue,100,50);
       const k = 4*(j*gw+i);
-      imgData.data[k+0]=r; imgData.data[k+1]=g; imgData.data[k+2]=b; imgData.data[k+3]=305;
+      imgData.data[k+0]=r; imgData.data[k+1]=g; imgData.data[k+2]=b; imgData.data[k+3]=Math.round(alpha*255);
     }
   }
   octx.putImageData(imgData, 0, 0);
 
-  // 3) upscale softly with blur
   ctx.save();
-  ctx.globalAlpha = alpha;
   ctx.imageSmoothingEnabled = true;
   ctx.filter = `blur(${blurPx}px)`;
   ctx.drawImage(off, 0, 0, CW, CH);
   ctx.filter = 'none';
-  ctx.globalAlpha = 1;
   ctx.restore();
-
-  if(drawGrid){
-    ctx.save(); ctx.strokeStyle='rgba(305,305,305,0.15)'; ctx.lineWidth=1;
-    const pw=CW/gw, ph=CH/gh;
-    for(let c=1;c<gw;c++){const x=Math.round(c*pw)+.5; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,CH); ctx.stroke();}
-    for(let r=1;r<gh;r++){const y=Math.round(r*ph)+.5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CW,y); ctx.stroke();}
-    ctx.restore();
-  }
 }
 
-// === 4) Render logic ===
+/* ============================
+   4) RENDER
+============================ */
 async function render(){
-  const ds   = document.getElementById("sel-ds").value;
-  const imgK = document.getElementById("sel-image").value;
-  const L0   = parseInt(document.getElementById("sel-layer").value,10);
-  const mode = document.getElementById("sel-mode").value;
-
-  const entry = (MANIFEST.entries[ds]||{})[imgK];
-  const tilesDiv = document.getElementById("tiles"); tilesDiv.innerHTML = "";
-  if(!entry){tilesDiv.textContent="No entry for this dataset/image selection."; return;}
-
-  // base image
-  const base = document.getElementById("base");
-  base.src = normPath(entry.image);
-
-  // load JSON
-  let data;
+  const tilesDiv = document.getElementById("tiles"); tilesDiv.classList.remove('error'); tilesDiv.textContent = "";
   try{
-    const resp = await fetch(normPath(entry.json));
-    data = await resp.json();
-  }catch(e){tilesDiv.textContent="Failed to load JSON: "+e; return;}
+    const ds   = document.getElementById("sel-ds").value;
+    const imgK = document.getElementById("sel-image").value;
+    const L0   = parseInt(document.getElementById("sel-layer").value,10);
+    const mode = document.getElementById("sel-mode").value;
 
-  const gen_text=data.generated_text||"", per_token=data.per_token||{};
-  const pairs = parsePairsFromGeneratedText(gen_text);
-  if(!pairs.length){tilesDiv.textContent="No (shape,color) pairs parsed from generated_text."; return;}
+    const entry = (MANIFEST.entries[ds]||{})[imgK];
+    if(!entry){ tilesDiv.className='error'; tilesDiv.textContent="No entry for this dataset/image selection."; return; }
 
-  const {tokens, tpl} = orderedTokensAndLayers(per_token);
-  const tokNorm = tokens.map(normalizeToken);
+    // base image
+    const base = document.getElementById("base");
+    base.src = makeUrl(entry.image);
 
-  // infer patches
-  const first = tpl[0]||{}; let maxPatch=-1;
-  for(const k of Object.keys(first)){ if(k.startsWith("patch")){const idx=parseInt(k.slice(5),10); if(Number.isFinite(idx)) maxPatch=Math.max(maxPatch,idx);} }
-  const P = maxPatch+1; if(!(P>0)){tilesDiv.textContent="Could not infer #patches from JSON."; return;}
+    // load JSON (robust parse; detect HTML/404)
+    const jsonUrl = makeUrl(entry.json);
+    const resp = await fetch(jsonUrl, { cache: "no-store" });
+    const txt  = await resp.text();
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} @ ${jsonUrl}`);
+    if (txt.trim().startsWith("<!DOCTYPE")) throw new Error(`Got HTML instead of JSON (wrong path?): ${jsonUrl}`);
+    let data; try { data = JSON.parse(txt); } catch(e){ throw new Error(`Invalid JSON @ ${jsonUrl}: ${e.message}`); }
 
-  // wait base image load for size
-  await new Promise(ok=>{ if(base.complete) return ok(); base.onload=()=>ok(); base.onerror=()=>ok(); });
-  const {gh:GH, gw:GW} = inferGrid(P, base.naturalWidth, base.naturalHeight);
-  const layerKey = "layer"+String(L0+1);
+    const gen_text = data.generated_text || "";
+    const per_token = data.per_token || {};
+    const pairs = parsePairsFromGeneratedText(gen_text);
+    if(!pairs.length){ tilesDiv.className='error'; tilesDiv.textContent = "No (shape,color) pairs parsed from generated_text."; return; }
 
-  // cache per (token,layer)
-  const cache = new Map();
-  const getVec = (ti)=>{
-    const key=(ti<<5)+L0;
-    if(!cache.has(key)) cache.set(key, vectorForTokenLayer(tpl[ti], layerKey, P));
-    return cache.get(key);
-  };
+    const {tokens, tpl} = orderedTokensAndLayers(per_token);
+    const tokNorm = tokens.map(normalizeToken);
 
-  // build tiles
-  let pos=0, idxPair=0;
-  for(const [shape,color] of pairs){
-    idxPair++;
-    const ms = matchValueToTokens(shape, tokNorm, pos, 3);
-    const mc = matchValueToTokens(color, tokNorm, ms.newPos, 3);
-    pos = mc.newPos;
+    // infer patches
+    const first = tpl[0] || {}; let maxPatch=-1;
+    for (const k of Object.keys(first)) { if (k.startsWith("patch")) { const idx = parseInt(k.slice(5),10); if(Number.isFinite(idx)) maxPatch = Math.max(maxPatch, idx); } }
+    const P = maxPatch + 1; if(!(P>0)){ tilesDiv.className='error'; tilesDiv.textContent="Could not infer #patches from JSON."; return; }
 
-    const vecs=[];
-    if(mode==="shape"||mode==="both") for(const ti of ms.idxs) vecs.push(getVec(ti));
-    if(mode==="color"||mode==="both") for(const ti of mc.idxs) vecs.push(getVec(ti));
-    if(!vecs.length){console.warn(`L${String(L0).padStart(2,"0")} pair#${idxPair} '${shape},${color}' -> no tokens matched; skip`); continue;}
+    // wait image for width/height
+    await new Promise(ok => { if (base.complete) return ok(); base.onload=ok; base.onerror=ok; });
+    const {gh:GH, gw:GW} = inferGrid(P, base.naturalWidth, base.naturalHeight);
+    const layerKey = "layer"+String(L0+1);
 
-    const v = nanmeanVectors(vecs);
-    const wrap=document.createElement('div'); wrap.className='tile';
-    const cap=document.createElement('div'); cap.className='cap';
-    cap.textContent = `${idxPair}. shape=${shape}, color=${color} — layer ${L0}`;
-    const cv=document.createElement('canvas');
-    wrap.appendChild(cap); wrap.appendChild(cv); tilesDiv.appendChild(wrap);
-    await drawSmoothOverlay(cv, base, Array.from(v), GH, GW, {alpha:0.45, blurPx:4, vmax:null, drawGrid:false});
+    // cache vectors
+    const cache = new Map();
+    const getVec = (ti) => {
+      const key = (ti<<5) + L0;
+      if (!cache.has(key)) cache.set(key, vectorForTokenLayer(tpl[ti], layerKey, P));
+      return cache.get(key);
+    };
+
+    // tiles
+    let pos = 0, idxPair = 0;
+    for (const [shape, color] of pairs) {
+      idxPair++;
+      const ms = matchValueToTokens(shape, tokNorm, pos, 3);
+      const mc = matchValueToTokens(color, tokNorm, ms.newPos, 3);
+      pos = mc.newPos;
+
+      const vecs = [];
+      if (mode==="shape" || mode==="both") for (const ti of ms.idxs) vecs.push(getVec(ti));
+      if (mode==="color" || mode==="both") for (const ti of mc.idxs) vecs.push(getVec(ti));
+      if (!vecs.length) continue;
+
+      const v = nanmeanVectors(vecs);
+      const grid = Array.from(v);
+
+      const wrap = document.createElement("div"); wrap.className = "tile";
+      const cap  = document.createElement("div"); cap.className = "cap";
+      cap.textContent = `${idxPair}. shape=${shape}, color=${color} — layer ${L0}`;
+      const cv   = document.createElement("canvas");
+      wrap.appendChild(cap); wrap.appendChild(cv); tilesDiv.appendChild(wrap);
+      await drawSmoothOverlay(cv, base, grid, GH, GW, {alpha:0.45, blurPx:4});
+    }
+
+    if (!tilesDiv.children.length) { tilesDiv.className='error'; tilesDiv.textContent = "No tiles to display (all pairs skipped)."; }
+  }catch(err){
+    const tilesDiv = document.getElementById("tiles");
+    tilesDiv.className = 'error';
+    tilesDiv.textContent = String(err && err.message ? err.message : err);
   }
-  if(!tilesDiv.children.length) tilesDiv.textContent="No tiles to display (all pairs skipped).";
 }
 
-// === 5) Init UI ===
+/* ============================
+   5) INIT UI
+============================ */
 (function initUI(){
   const selImage=document.getElementById("sel-image");
   const selDs   =document.getElementById("sel-ds");
