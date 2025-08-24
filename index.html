@@ -46,16 +46,27 @@
   <div id="tiles"></div>
 
 <script>
-const TILES_BASE = ".";  // folder with manifest.json + tiles
+/* Folder that contains manifest.json and all tiles/images (relative to this HTML). */
+const TILES_BASE = ".";
+
+/* Only these triplet ids should appear in the selector. */
+const ALLOWED_TRIPLETS = ["5","10","20","35","45","50"];
+
 let MANI = null;
 
-function byNumericKeys(obj){ return Object.keys(obj).sort((a,b)=>Number(a)-Number(b)); }
+function byNumeric(arr){ return arr.sort((a,b)=>Number(a)-Number(b)); }
 
 async function loadManifest(){
   const url = `${TILES_BASE}/manifest.json`;
   const resp = await fetch(url, {cache:"no-store"});
   if(!resp.ok) throw new Error(`Cannot load manifest.json (${resp.status})`);
   MANI = await resp.json();
+}
+
+function tripletsForDataset(ds){
+  const all = Object.keys(MANI.entries[ds] || {});
+  const filtered = all.filter(t => ALLOWED_TRIPLETS.includes(String(t)));
+  return byNumeric(filtered);
 }
 
 function fillSelectors(){
@@ -66,11 +77,15 @@ function fillSelectors(){
   selDs.innerHTML = ""; selImg.innerHTML = ""; selL.innerHTML = "";
 
   const datasets = Object.keys(MANI.entries);
-  datasets.forEach(ds => { const o=document.createElement("option"); o.value=ds; o.textContent=ds; selDs.appendChild(o); });
+  datasets.forEach(ds => {
+    const o=document.createElement("option"); o.value=ds; o.textContent=ds; selDs.appendChild(o);
+  });
   selDs.selectedIndex = 0;
 
+  // Fill triplets but only those in ALLOWED_TRIPLETS
   const firstDs = selDs.value;
-  byNumericKeys(MANI.entries[firstDs]).forEach(t => { const o=document.createElement("option"); o.value=t; o.textContent=t; selImg.appendChild(o); });
+  const trips = tripletsForDataset(firstDs);
+  trips.forEach(t => { const o=document.createElement("option"); o.value=t; o.textContent=t; selImg.appendChild(o); });
 
   for(let i=0;i<28;i++){ const o=document.createElement("option"); o.value=i; o.textContent=String(i); selL.appendChild(o); }
   selL.value = "14";
@@ -85,7 +100,8 @@ function onDsChange(){
   const ds = document.getElementById("sel-ds").value;
   const selImg= document.getElementById("sel-image");
   selImg.innerHTML = "";
-  byNumericKeys(MANI.entries[ds]).forEach(t => { const o=document.createElement("option"); o.value=t; o.textContent=t; selImg.appendChild(o); });
+  const trips = tripletsForDataset(ds);
+  trips.forEach(t => { const o=document.createElement("option"); o.value=t; o.textContent=t; selImg.appendChild(o); });
   render();
 }
 
@@ -100,12 +116,23 @@ function render(){
   tilesDiv.classList.remove("error");
   tilesDiv.textContent = "";
 
-  if(!entry){ tilesDiv.classList.add("error"); tilesDiv.textContent="No entry for this dataset/image."; return; }
+  if(!entry){
+    tilesDiv.classList.add("error");
+    tilesDiv.textContent="No entry for this dataset/image or not in allowed triplets.";
+    return;
+  }
 
   document.getElementById("base").src = `${TILES_BASE}/${entry.base}`;
 
-  const sel = entry.tiles.filter(t => t.mode===mode && t.layer===layer).sort((a,b)=>a.pair-b.pair);
-  if(!sel.length){ tilesDiv.classList.add("error"); tilesDiv.textContent="No tiles for this selection."; return; }
+  const sel = entry.tiles
+    .filter(t => t.mode===mode && t.layer===layer)
+    .sort((a,b)=>a.pair-b.pair);
+
+  if(!sel.length){
+    tilesDiv.classList.add("error");
+    tilesDiv.textContent="No tiles for this selection.";
+    return;
+  }
 
   for(const t of sel){
     const wrap = document.createElement("div"); wrap.className = "tile";
