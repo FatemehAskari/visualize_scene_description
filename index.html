@@ -2,49 +2,37 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<title>Value-only Attention Viewer (shape / color / both)</title>
+<title>Value-only Attention Viewer (static tiles)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <style>
   body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;margin:16px;color:#222}
   h1{margin:0 0 8px 0;font-size:20px}
+  .muted{color:#777;font-size:13px}
   .controls{display:grid;grid-template-columns:repeat(4,minmax(200px,1fr));gap:12px;margin:12px 0 16px 0}
   .row{margin:12px 0}
   .base-image{max-width:100%;height:auto;border:1px solid #ddd;border-radius:8px}
   #tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-top:12px}
   .tile{border:1px solid #e0e0e0;border-radius:10px;padding:8px;box-shadow:0 1px 4px rgba(0,0,0,.05);background:#fff}
   .cap{font-size:12px;color:#555;margin:4px 0 8px 0;line-height:1.2}
-  canvas{width:100%;height:auto;display:block;border-radius:6px}
-  .muted{color:#777;font-size:13px}
-  select,option{font-size:14px}
+  .thumb{width:100%;height:auto;display:block;border-radius:6px}
   .error{color:#b00020;white-space:pre-wrap}
+  select,option{font-size:14px}
 </style>
-<!-- pako برای باز کردن .gz -->
-<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
 </head>
 <body>
   <h1>Value-only Attention Viewer</h1>
   <div class="muted">
-    Pick: image (triplet id), dataset variant, layer (0..27), and value mode (shape / color / both).
-    Tiles show overlay heatmaps for each (shape,color) pair in the generated output.
+    Choose image (triplet), dataset, layer (0..27), and mode (shape/color/both).
+    Uses pre-baked tiles under <code>static_tiles/</code>. Captions are text-only (not drawn on images).
   </div>
 
   <div class="controls">
-    <label>
-      <div>Image (triplet id)</div>
-      <select id="sel-image"></select>
-    </label>
-    <label>
-      <div>Dataset</div>
-      <select id="sel-ds"></select>
-    </label>
-    <label>
-      <div>Layer</div>
-      <select id="sel-layer"></select>
-    </label>
-    <label>
-      <div>Value mode</div>
+    <label><div>Image (triplet id)</div><select id="sel-image"></select></label>
+    <label><div>Dataset</div><select id="sel-ds"></select></label>
+    <label><div>Layer</div><select id="sel-layer"></select></label>
+    <label><div>Value mode</div>
       <select id="sel-mode">
-        <option value="both">both (average of shape & color)</option>
+        <option value="both">both (average of shape &amp; color)</option>
         <option value="shape">shape only</option>
         <option value="color">color only</option>
       </select>
@@ -58,303 +46,91 @@
   <div id="tiles"></div>
 
 <script>
-/* ============================
-   1) EMBEDDED MANIFEST (EDIT!)
-============================ */
-const MANIFEST = {
-  datasets: ["row", "just_number", "just_scan", "simple"],
-  triplet_ids: ["5","10","20","35","45","50"],
-  entries: {
-    row: {
-      "5":  { image: "row/15/5/nObjects=15_triplet=5_0.png",  json: "row/15/5/attn_patches_nObjects=15_triplet=5_0.json" },
-      "10": { image: "row/15/10/nObjects=15_triplet=10_0.png", json: "row/15/10/attn_patches_nObjects=15_triplet=10_0.json" },
-      "20": { image: "row/15/20/nObjects=15_triplet=20_0.png", json: "row/15/20/attn_patches_nObjects=15_triplet=20_0.json" },
-      "35": { image: "row/15/35/nObjects=15_triplet=35_0.png", json: "row/15/35/attn_patches_nObjects=15_triplet=35_0.json" },
-      "45": { image: "row/15/45/nObjects=15_triplet=45_0.png", json: "row/15/45/attn_patches_nObjects=15_triplet=45_0.json" },
-      "50": { image: "row/15/50/nObjects=15_triplet=50_0.png", json: "row/15/50/attn_patches_nObjects=15_triplet=50_0.json" }
-    },
-    just_number: {
-      "5":  { image: "just_number/15/5/nObjects=15_triplet=5_0.png",  json: "just_number/15/5/attn_patches_nObjects=15_triplet=5_0.json" },
-      "10": { image: "just_number/15/10/nObjects=15_triplet=10_0.png", json: "just_number/15/10/attn_patches_nObjects=15_triplet=10_0.json" },
-      "20": { image: "just_number/15/20/nObjects=15_triplet=20_0.png", json: "just_number/15/20/attn_patches_nObjects=15_triplet=20_0.json" },
-      "35": { image: "just_number/15/35/nObjects=15_triplet=35_0.png", json: "just_number/15/35/attn_patches_nObjects=15_triplet=35_0.json" },
-      "45": { image: "just_number/15/45/nObjects=15_triplet=45_0.png", json: "just_number/15/45/attn_patches_nObjects=15_triplet=45_0.json" },
-      "50": { image: "just_number/15/50/nObjects=15_triplet=50_0.png", json: "just_number/15/50/attn_patches_nObjects=15_triplet=50_0.json" }
-    },
-    just_scan: {
-      "5":  { image: "just_scan/15/5/nObjects=15_triplet=5_0.png",  json: "just_scan/15/5/attn_patches_nObjects=15_triplet=5_0.json" },
-      "10": { image: "just_scan/15/10/nObjects=15_triplet=10_0.png", json: "just_scan/15/10/attn_patches_nObjects=15_triplet=10_0.json" },
-      "20": { image: "just_scan/15/20/nObjects=15_triplet=20_0.png", json: "just_scan/15/20/attn_patches_nObjects=15_triplet=20_0.json" },
-      "35": { image: "just_scan/15/35/nObjects=15_triplet=35_0.png", json: "just_scan/15/35/attn_patches_nObjects=15_triplet=35_0.json" },
-      "45": { image: "just_scan/15/45/nObjects=15_triplet=45_0.png", json: "just_scan/15/45/attn_patches_nObjects=15_triplet=45_0.json" },
-      "50": { image: "just_scan/15/50/nObjects=15_triplet=50_0.png", json: "just_scan/15/50/attn_patches_nObjects=15_triplet=50_0.json" }
-    },
-    simple: {
-      "5":  { image: "simple/15/5/nObjects=15_triplet=5_0.png",  json: "simple/15/5/attn_patches_nObjects=15_triplet=5_0.json" },
-      "10": { image: "simple/15/10/nObjects=15_triplet=10_0.png", json: "simple/15/10/attn_patches_nObjects=15_triplet=10_0.json" },
-      "20": { image: "simple/15/20/nObjects=15_triplet=20_0.png", json: "simple/15/20/attn_patches_nObjects=15_triplet=20_0.json" },
-      "35": { image: "simple/15/35/nObjects=15_triplet=35_0.png", json: "simple/15/35/attn_patches_nObjects=15_triplet=35_0.json" },
-      "45": { image: "simple/15/45/nObjects=15_triplet=45_0.png", json: "simple/15/45/attn_patches_nObjects=15_triplet=45_0.json" },
-      "50": { image: "simple/15/50/nObjects=15_triplet=50_0.png", json: "simple/15/50/attn_patches_nObjects=15_triplet=50_0.json" }
-    }
-  },
-  layers: Array.from({length: 28}, (_,i)=>i),
-  note: "paths are relative to index.html"
-};
+const TILES_BASE = "./static_tiles";  // folder with manifest.json + tiles
+let MANI = null;
 
-/* ============================
-   2) HELPERS (paths, fetch)
-============================ */
-const BRANCH = "main"; // اگر برنچ اصلی‌ات چیز دیگری است، این را تغییر بده
+function byNumericKeys(obj){ return Object.keys(obj).sort((a,b)=>Number(a)-Number(b)); }
 
-function normalizeToken(s){return (s||"").toLowerCase().replace(/[^a-z0-9\-]+/g,"");}
-function parsePairsFromGeneratedText(raw){
-  if(!raw) return [];
-  try{
-    const i0 = raw.indexOf("["), i1 = raw.lastIndexOf("]");
-    if(i0>=0 && i1>i0){
-      const arr = JSON.parse(raw.slice(i0, i1+1));
-      const out = [];
-      for(const obj of arr){
-        if(obj && typeof obj==="object" && "shape" in obj && "color" in obj){
-          out.push([String(obj.shape), String(obj.color)]);
-        }
-      }
-      if(out.length) return out;
-    }
-  }catch(e){}
-  const out=[]; const re=/\{[^}]*\}/gs, rS=/"shape"\s*:\s*"([^"]+)"/, rC=/"color"\s*:\s*"([^"]+)"/;
-  for(const m of raw.matchAll(re)){const s=m[0]; const ms=s.match(rS), mc=s.match(rC); if(ms&&mc) out.push([ms[1],mc[1]]);}
-  return out;
-}
-function orderedTokensAndLayers(per_token){
-  const items = Object.entries(per_token).sort((a,b)=>a[0]<b[0]?-1:(a[0]>b[0]?1:0));
-  const tokens=[], tpl=[];
-  for(const [k,v] of items){const i=k.indexOf(":"); tokens.push(i>=0?k.slice(i+1):k); tpl.push(v);}
-  return {tokens, tpl};
-}
-function matchValueToTokens(value, tok_norm, startPos, maxSpan=3){
-  const target = normalizeToken(value), N = tok_norm.length;
-  for(let i=startPos;i<N;i++){
-    for(let L=Math.min(maxSpan,N-i); L>=1; L--){
-      const chunk = tok_norm.slice(i,i+L);
-      if(chunk.some(c=>!c)) continue;
-      if(target===chunk.join("-") || target===chunk.join("")) return {idxs:Array.from({length:L},(_,k)=>i+k), newPos:i+L};
-    }
-  }
-  return {idxs:[], newPos:startPos};
-}
-function inferGrid(nPatches, imgW, imgH){
-  const target = imgW/Math.max(1e-6,imgH); let best=null;
-  for(let gh=1; gh<=nPatches; gh++){
-    if(nPatches%gh) continue; const gw=nPatches/gh, err=Math.abs(gw/gh - target);
-    if(!best || err<best.err) best={err,gh,gw};
-  }
-  if(!best){const gw=Math.max(1,Math.round(Math.sqrt(nPatches))); const gh=Math.max(1,Math.floor(nPatches/gw)); return {gh, gw:Math.max(1,Math.floor(nPatches/gh))};}
-  return {gh:best.gh, gw:best.gw};
-}
-function vectorForTokenLayer(patchLayers, layerKey, P){
-  const v=new Float32Array(P); v.fill(NaN);
-  for(let p=0;p<P;p++){const m=patchLayers["patch"+p]; if(!m) continue; const val=m[layerKey]; if(typeof val==="number") v[p]=val;}
-  return v;
-}
-function nanmeanVectors(vecs){
-  if(!vecs.length) return null;
-  const P=vecs[0].length, out=new Float32Array(P), cnt=new Uint16Array(P);
-  for(const v of vecs){for(let i=0;i<P;i++){const x=v[i]; if(!Number.isFinite(x)) continue; out[i]+=x; cnt[i]++;}}
-  for(let i=0;i<P;i++) out[i]=cnt[i]?out[i]/cnt[i]:NaN;
-  return out;
-}
-function makeAbsUrl(rel){ return new URL((rel||"").replace(/\\/g,"/"), document.baseURI).toString(); }
-function buildRawUrl(rel){
-  const host = location.hostname;                  // username.github.io
-  const user = host.split(".")[0];                 // username
-  const parts = location.pathname.split("/").filter(Boolean);
-  const repo  = parts[0] || "";                    // repo name
-  const path  = (rel||"").replace(/^\.\//,"");
-  return `https://raw.githubusercontent.com/${user}/${repo}/${BRANCH}/${path}`;
-}
-async function fetchJsonSmart(relPath){
-  // 1) .gz کنار JSON (سریع‌ترین)
-  // 2) خود JSON
-  // 3) فالبک raw.githubusercontent.com
-  const urls = [];
-  if (relPath.endsWith(".json")) {
-    urls.push(makeAbsUrl(relPath + ".gz"));
-    urls.push(makeAbsUrl(relPath.replace(/\.json$/, ".json.gz")));
-  }
-  urls.push(makeAbsUrl(relPath));
-  if (relPath.endsWith(".json")) {
-    urls.push(buildRawUrl(relPath + ".gz"));
-    urls.push(buildRawUrl(relPath));
-  }
-
-  let lastErr=null;
-  for (const u of urls) {
-    try {
-      const r = await fetch(u);          // کش مرورگر فعال است
-      if (!r.ok) throw new Error(`HTTP ${r.status} @ ${u}`);
-      if (u.endsWith(".gz")) {
-        const buf = new Uint8Array(await r.arrayBuffer());
-        const txt = new TextDecoder().decode(pako.ungzip(buf));
-        return JSON.parse(txt);
-      } else {
-        const txt = await r.text();
-        if (/^<!doctype/i.test(txt)) throw new Error(`HTML instead of JSON @ ${u}`);
-        return JSON.parse(txt);
-      }
-    } catch(e){ lastErr=e; console.warn("[fetchJsonSmart]", e.message); }
-  }
-  throw new Error(`Failed to load JSON after tries:\n- ${urls.join("\n- ")}\nLast error: ${lastErr?.message||lastErr}`);
+async function loadManifest(){
+  const url = `${TILES_BASE}/manifest.json`;
+  const resp = await fetch(url, {cache:"no-store"});
+  if(!resp.ok) throw new Error(`Cannot load manifest.json (${resp.status})`);
+  MANI = await resp.json();
 }
 
-/* ============================
-   3) SMOOTH OVERLAY (no grid)
-============================ */
-function hsl2rgb(h,s,l){h/=360; s/=100; l/=100; const a=s*Math.min(l,1-l);
-  const f=n=>{const k=(n+h*12)%12; const c=l - a*Math.max(-1,Math.min(k-3,9-k,1)); return Math.round(255*c);};
-  return [f(0),f(8),f(4)];
-}
-async function drawSmoothOverlay(canvas, baseImgEl, grid, gh, gw, opts={}){
-  const {alpha=0.45, blurPx=4, vmax=null} = opts;
-  const ctx = canvas.getContext('2d');
-  const W = baseImgEl.naturalWidth || baseImgEl.width, H = baseImgEl.naturalHeight || baseImgEl.height;
-  const scale = Math.min(1, 700/W);
-  const CW = Math.round(W*scale), CH = Math.round(H*scale);
-  canvas.width = CW; canvas.height = CH;
+function fillSelectors(){
+  const selDs = document.getElementById("sel-ds");
+  const selImg= document.getElementById("sel-image");
+  const selL  = document.getElementById("sel-layer");
 
-  ctx.clearRect(0,0,CW,CH);
-  ctx.drawImage(baseImgEl, 0, 0, CW, CH);
+  selDs.innerHTML = ""; selImg.innerHTML = ""; selL.innerHTML = "";
 
-  const off = document.createElement('canvas'); off.width = gw; off.height = gh;
-  const octx = off.getContext('2d');
-  const imgData = octx.createImageData(gw, gh);
+  const datasets = Object.keys(MANI.entries);
+  datasets.forEach(ds => { const o=document.createElement("option"); o.value=ds; o.textContent=ds; selDs.appendChild(o); });
+  selDs.selectedIndex = 0;
 
-  const finite = grid.filter(Number.isFinite);
-  let vmaxUse = vmax;
-  if(vmaxUse==null){
-    if (finite.length) {
-      const sorted = Array.from(finite).sort((a,b)=>a-b);
-      vmaxUse = sorted[Math.floor(0.99*(sorted.length-1))] || 1;
-    } else { vmaxUse = 1; }
-    if(!isFinite(vmaxUse) || vmaxUse<=0) vmaxUse=1;
-  }
+  const firstDs = selDs.value;
+  byNumericKeys(MANI.entries[firstDs]).forEach(t => { const o=document.createElement("option"); o.value=t; o.textContent=t; selImg.appendChild(o); });
 
-  for(let j=0;j<gh;j++){
-    for(let i=0;i<gw;i++){
-      const v = grid[j*gw+i];
-      const x = Number.isFinite(v) ? Math.max(0, Math.min(1, v / vmaxUse)) : 0;
-      const hue = (1-x)*240; const [r,g,b] = hsl2rgb(hue,100,50);
-      const k = 4*(j*gw+i);
-      imgData.data[k+0]=r; imgData.data[k+1]=g; imgData.data[k+2]=b; imgData.data[k+3]=Math.round(alpha*255);
-    }
-  }
-  octx.putImageData(imgData, 0, 0);
+  for(let i=0;i<28;i++){ const o=document.createElement("option"); o.value=i; o.textContent=String(i); selL.appendChild(o); }
+  selL.value = "14";
 
-  ctx.save();
-  ctx.imageSmoothingEnabled = true;
-  ctx.filter = `blur(${blurPx}px)`;
-  ctx.drawImage(off, 0, 0, CW, CH);
-  ctx.filter = 'none';
-  ctx.restore();
+  selDs.addEventListener("change", onDsChange);
+  selImg.addEventListener("change", render);
+  selL.addEventListener("change", render);
+  document.getElementById("sel-mode").addEventListener("change", render);
 }
 
-/* ============================
-   4) RENDER
-============================ */
-async function render(){
-  const tilesDiv = document.getElementById("tiles"); tilesDiv.classList.remove('error'); tilesDiv.textContent = "";
-  try{
-    const ds   = document.getElementById("sel-ds").value;
-    const imgK = document.getElementById("sel-image").value;
-    const L0   = parseInt(document.getElementById("sel-layer").value,10);
-    const mode = document.getElementById("sel-mode").value;
-
-    const entry = (MANIFEST.entries[ds]||{})[imgK];
-    if(!entry){ tilesDiv.className='error'; tilesDiv.textContent="No entry for this dataset/image selection."; return; }
-
-    const base = document.getElementById("base");
-    base.src = makeAbsUrl(entry.image);
-
-    // — اینجا نسخه‌ی سریع و مقاوم برای بارگذاری JSON —
-    const data = await fetchJsonSmart(entry.json);
-
-    const gen_text = data.generated_text || "";
-    const per_token = data.per_token || {};
-    const pairs = parsePairsFromGeneratedText(gen_text);
-    if(!pairs.length){ tilesDiv.className='error'; tilesDiv.textContent = "No (shape,color) pairs parsed from generated_text."; return; }
-
-    const {tokens, tpl} = orderedTokensAndLayers(per_token);
-    const tokNorm = tokens.map(normalizeToken);
-
-    const first = tpl[0] || {}; let maxPatch=-1;
-    for (const k of Object.keys(first)) { if (k.startsWith("patch")) { const idx = parseInt(k.slice(5),10); if(Number.isFinite(idx)) maxPatch = Math.max(maxPatch, idx); } }
-    const P = maxPatch + 1; if(!(P>0)){ tilesDiv.className='error'; tilesDiv.textContent="Could not infer #patches from JSON."; return; }
-
-    await new Promise(ok => { if (base.complete) return ok(); base.onload=ok; base.onerror=ok; });
-    const {gh:GH, gw:GW} = inferGrid(P, base.naturalWidth, base.naturalHeight);
-    const layerKey = "layer"+String(L0+1);
-
-    const cache = new Map();
-    const getVec = (ti) => {
-      const key = (ti<<5) + L0;
-      if (!cache.has(key)) cache.set(key, vectorForTokenLayer(tpl[ti], layerKey, P));
-      return cache.get(key);
-    };
-
-    let pos = 0, idxPair = 0;
-    for (const [shape, color] of pairs) {
-      idxPair++;
-      const ms = matchValueToTokens(shape, tokNorm, pos, 3);
-      const mc = matchValueToTokens(color, tokNorm, ms.newPos, 3);
-      pos = mc.newPos;
-
-      const vecs = [];
-      if (mode==="shape" || mode==="both") for (const ti of ms.idxs) vecs.push(getVec(ti));
-      if (mode==="color" || mode==="both") for (const ti of mc.idxs) vecs.push(getVec(ti));
-      if (!vecs.length) continue;
-
-      const v = nanmeanVectors(vecs);
-      const grid = Array.from(v);
-
-      const wrap = document.createElement("div"); wrap.className = "tile";
-      const cap  = document.createElement("div"); cap.className = "cap";
-      cap.textContent = `${idxPair}. shape=${shape}, color=${color} — layer ${L0}`;
-      const cv   = document.createElement("canvas");
-      wrap.appendChild(cap); wrap.appendChild(cv); tilesDiv.appendChild(wrap);
-      await drawSmoothOverlay(cv, base, grid, GH, GW, {alpha:0.45, blurPx:4});
-    }
-
-    if (!tilesDiv.children.length) { tilesDiv.className='error'; tilesDiv.textContent = "No tiles to display (all pairs skipped)."; }
-  }catch(err){
-    const tilesDiv = document.getElementById("tiles");
-    tilesDiv.className = 'error';
-    tilesDiv.textContent = String(err && err.message ? err.message : err);
-  }
-}
-
-/* ============================
-   5) INIT UI
-============================ */
-(function initUI(){
-  const selImage=document.getElementById("sel-image");
-  const selDs   =document.getElementById("sel-ds");
-  const selL    =document.getElementById("sel-layer");
-
-  for(const ds of MANIFEST.datasets){const o=document.createElement('option'); o.value=ds; o.textContent=ds; selDs.appendChild(o);}
-  for(const t of MANIFEST.triplet_ids){const o=document.createElement('option'); o.value=t; o.textContent=t; selImage.appendChild(o);}
-  for(let i=0;i<28;i++){const o=document.createElement('option'); o.value=i; o.textContent=String(i); selL.appendChild(o);}
-
-  if(selImage.options.length>0) selImage.selectedIndex=0;
-  if(selDs.options.length>0) selDs.selectedIndex=0;
-  selL.value="14";
-
-  selImage.addEventListener('change', render);
-  selDs.addEventListener('change', render);
-  selL.addEventListener('change', render);
-  document.getElementById('sel-mode').addEventListener('change', render);
-
+function onDsChange(){
+  const ds = document.getElementById("sel-ds").value;
+  const selImg= document.getElementById("sel-image");
+  selImg.innerHTML = "";
+  byNumericKeys(MANI.entries[ds]).forEach(t => { const o=document.createElement("option"); o.value=t; o.textContent=t; selImg.appendChild(o); });
   render();
+}
+
+function render(){
+  const ds    = document.getElementById("sel-ds").value;
+  const trip  = document.getElementById("sel-image").value;
+  const layer = Number(document.getElementById("sel-layer").value);
+  const mode  = document.getElementById("sel-mode").value;
+
+  const entry = (MANI.entries[ds]||{})[trip];
+  const tilesDiv = document.getElementById("tiles");
+  tilesDiv.classList.remove("error");
+  tilesDiv.textContent = "";
+
+  if(!entry){ tilesDiv.classList.add("error"); tilesDiv.textContent="No entry for this dataset/image."; return; }
+
+  document.getElementById("base").src = `${TILES_BASE}/${entry.base}`;
+
+  const sel = entry.tiles.filter(t => t.mode===mode && t.layer===layer).sort((a,b)=>a.pair-b.pair);
+  if(!sel.length){ tilesDiv.classList.add("error"); tilesDiv.textContent="No tiles for this selection."; return; }
+
+  for(const t of sel){
+    const wrap = document.createElement("div"); wrap.className = "tile";
+    const cap  = document.createElement("div"); cap.className = "cap";
+    cap.textContent = `${t.pair}. shape=${t.shape}, color=${t.color} — layer ${t.layer}`;
+    const img  = document.createElement("img"); img.className = "thumb";
+    img.loading = "lazy";
+    img.src = `${TILES_BASE}/${t.file}`;
+    img.alt = cap.textContent;
+    wrap.appendChild(cap);
+    wrap.appendChild(img);
+    tilesDiv.appendChild(wrap);
+  }
+}
+
+(async function init(){
+  try{
+    await loadManifest();
+    fillSelectors();
+    render();
+  }catch(e){
+    const tilesDiv = document.getElementById("tiles");
+    tilesDiv.classList.add("error");
+    tilesDiv.textContent = String(e && e.message ? e.message : e);
+  }
 })();
 </script>
 </body>
